@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Hafland Premium</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #ffffff;
+            --text: #000000;
+            --border: #f0f0f0;
+            --glass: rgba(255, 255, 255, 0.98);
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
+            margin: 0; padding: 0;
+            overflow: hidden; height: 100vh;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Нижняя навигация с учетом безопасных зон iPhone/Android */
+        .glass-nav {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border);
+            z-index: 99999 !important;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: calc(75px + env(safe-area-inset-bottom));
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-start;
+            padding-top: 10px;
+            padding-bottom: env(safe-area-inset-bottom);
+            pointer-events: auto !important;
+        }
+
+        .content-scroll {
+            height: calc(100vh - 160px);
+            overflow-y: auto;
+            position: relative;
+            z-index: 10;
+            padding-bottom: 120px; /* Отступ чтобы контент не перекрывался навой */
+        }
+        .content-scroll::-webkit-scrollbar { display: none; }
+        
+        .btn-black {
+            background: #000;
+            color: #fff;
+            transition: all 0.2s ease;
+        }
+        .btn-black:active { transform: scale(0.96); }
+        
+        input { 
+            outline: none; 
+            user-select: text !important; 
+            color: #000; 
+            background: transparent;
+        }
+        
+        .msg-me { background: #000; color: #fff; border-radius: 20px; }
+        .msg-them { background: #fff; color: #000; border-radius: 20px; border: 1px solid var(--border); }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-in { animation: fadeIn 0.3s ease-out forwards; }
+        
+        nav button {
+            cursor: pointer !important;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="h-full flex flex-col relative bg-white">
+        <div id="loader" class="h-full flex flex-col items-center justify-center">
+            <div class="w-8 h-8 border-2 border-gray-100 border-t-black rounded-full animate-spin"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAkgC4melkEcj0pDywonPG3aAeE3vACoF0",
+            authDomain: "hafland-c8dc3.firebaseapp.com",
+            projectId: "hafland-c8dc3",
+            storageBucket: "hafland-c8dc3.firebasestorage.app",
+            messagingSenderId: "163991622474",
+            appId: "1:163991622474:web:06a7357e295c9a98b327b3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const APP_ID = "hafland_v3_minimal_white";
+
+        window.state = {
+            user: null, profile: null, tab: 'chats', chatMode: null,
+            messages: [], users: [], terminal: ['[Линия связи защищена]'],
+            savedAccs: JSON.parse(localStorage.getItem('h_accs_white') || '[]')
+        };
+
+        window.changeTab = (newTab) => {
+            window.state.tab = newTab;
+            window.state.chatMode = null;
+            render();
+        };
+
+        onAuthStateChanged(auth, async (u) => {
+            if (u) {
+                window.state.user = u;
+                initListeners(u.uid);
+            } else {
+                renderAuth();
+            }
+        });
+
+        function initListeners(uid) {
+            onSnapshot(doc(db, 'artifacts', APP_ID, 'users', uid), (s) => {
+                if (s.exists()) { 
+                    window.state.profile = s.data(); 
+                    render(); 
+                } else { 
+                    renderAuth(); 
+                }
+            });
+
+            onSnapshot(collection(db, 'artifacts', APP_ID, 'users'), (s) => {
+                window.state.users = s.docs.map(d => d.data());
+                render();
+            });
+
+            onSnapshot(collection(db, 'artifacts', APP_ID, 'messages'), (s) => {
+                const all = s.docs.map(d => d.data());
+                window.state.messages = all.filter(m => m.from === uid || m.to === uid || m.to === 'bot').sort((a,b) => a.time - b.time);
+                render();
+            });
+        }
+
+        window.handleAuth = async (mode) => {
+            const nickInput = document.getElementById('a-nick');
+            const passInput = document.getElementById('a-pass');
+            if(!nickInput || !passInput) return;
+            const nick = nickInput.value.trim().toLowerCase();
+            const pass = passInput.value.trim();
+            if(!nick || !pass) return;
+
+            const regRef = doc(db, 'artifacts', APP_ID, 'registry', nick);
+            const regSnap = await getDoc(regRef);
+
+            try {
+                if(mode === 'reg') {
+                    if(regSnap.exists()) return alert("Логин занят");
+                    const cred = await signInAnonymously(auth);
+                    const isAdmin = nick === 'hafa168';
+                    const profile = {
+                        uid: cred.user.uid,
+                        username: nick,
+                        pass: pass,
+                        stars: isAdmin ? 9999999 : 500,
+                        tag: isAdmin ? 'ADMIN' : 'USER'
+                    };
+                    await setDoc(regRef, { uid: cred.user.uid, pass });
+                    await setDoc(doc(db, 'artifacts', APP_ID, 'users', cred.user.uid), profile);
+                    saveAcc(nick, pass, cred.user.uid);
+                } else {
+                    if(!regSnap.exists()) return alert("Аккаунт не найден");
+                    if(regSnap.data().pass !== pass) return alert("Неверный пароль");
+                    await signInAnonymously(auth);
+                    saveAcc(nick, pass, regSnap.data().uid);
+                }
+            } catch (e) { alert("Ошибка доступа"); }
+        };
+
+        const saveAcc = (nick, pass, uid) => {
+            let accs = JSON.parse(localStorage.getItem('h_accs_white') || '[]');
+            if(!accs.find(a => a.nick === nick)) accs.push({nick, pass, uid});
+            localStorage.setItem('h_accs_white', JSON.stringify(accs));
+            window.state.savedAccs = accs;
+        };
+
+        window.sendMsg = async () => {
+            const input = document.getElementById('msg-input');
+            const txt = input?.value.trim();
+            if(!txt || !window.state.chatMode) return;
+            input.value = '';
+
+            await addDoc(collection(db, 'artifacts', APP_ID, 'messages'), {
+                from: window.state.user.uid,
+                to: window.state.chatMode,
+                text: txt,
+                sender: window.state.profile.username,
+                tag: window.state.profile.tag,
+                time: Date.now()
+            });
+        };
+
+        window.runTerm = () => {
+            const i = document.getElementById('t-input');
+            const v = i.value.trim();
+            i.value = '';
+            window.state.terminal.push(`> ${v}`);
+            if(v.startsWith('hafamessage ')) {
+                const message = v.replace('hafamessage ', '');
+                addDoc(collection(db, 'artifacts', APP_ID, 'messages'), {
+                    from: window.state.user.uid,
+                    to: 'bot',
+                    text: message,
+                    sender: window.state.profile.username,
+                    tag: 'ADMIN',
+                    time: Date.now()
+                });
+                window.state.terminal.push('ОТПРАВЛЕНО В ГЛОБАЛЬНЫЙ УЗЕЛ.');
+            }
+            render();
+        };
+
+        function renderAuth() {
+            document.getElementById('app').innerHTML = `
+                <div class="h-full flex flex-col items-center justify-center p-12 bg-white">
+                    <div class="mb-12 text-center animate-in">
+                        <h1 class="text-4xl font-black italic uppercase tracking-tighter">Hafland</h1>
+                        <p class="text-[9px] font-bold text-gray-300 uppercase tracking-widest mt-1">Вход в систему</p>
+                    </div>
+                    <div class="w-full max-w-xs space-y-3">
+                        <input id="a-nick" type="text" class="w-full p-5 rounded-3xl bg-white border border-gray-100 text-xs font-bold text-center" placeholder="ИМЯ ПОЛЬЗОВАТЕЛЯ">
+                        <input id="a-pass" type="password" class="w-full p-5 rounded-3xl bg-white border border-gray-100 text-xs font-bold text-center" placeholder="ПАРОЛЬ">
+                        <div class="grid grid-cols-2 gap-3 pt-3">
+                            <button onclick="handleAuth('login')" class="p-5 border border-gray-100 rounded-3xl text-[10px] font-black uppercase tracking-widest">Вход</button>
+                            <button onclick="handleAuth('reg')" class="btn-black p-5 rounded-3xl text-[10px] font-black uppercase tracking-widest">Создать</button>
+                        </div>
+                    </div>
+                </div>`;
+            lucide.createIcons();
+        }
+
+        function render() {
+            const s = window.state;
+            if(!s.profile) return;
+            const isAdmin = s.profile.username === 'hafa168';
+
+            document.getElementById('app').innerHTML = `
+                <header class="pt-16 px-8 pb-6 flex justify-between items-end border-b border-gray-100 bg-white">
+                    <div>
+                        <h2 class="text-2xl font-black italic uppercase tracking-tighter">Hafland</h2>
+                        <p class="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">
+                            ${s.chatMode ? (s.chatMode==='bot'?'System AI':(s.users.find(u=>u.uid===s.chatMode)?.username || 'Chat')) : s.tab}
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2 px-4 py-2 rounded-full border border-gray-100">
+                        <span class="text-[11px] font-black">${s.profile.stars.toLocaleString()}</span>
+                        <i data-lucide="zap" size="10" class="fill-black"></i>
+                    </div>
+                </header>
+
+                <main class="content-scroll animate-in bg-white">
+                    ${renderPage(isAdmin)}
+                </main>
+
+                <nav class="glass-nav">
+                    ${navItem('chats', 'message-square', 'Чаты')}
+                    ${navItem('network', 'globe', 'Сеть')}
+                    ${navItem('market', 'package', 'Рынок')}
+                    ${isAdmin ? navItem('term', 'hash', 'Терм') : ''}
+                    ${navItem('profile', 'user', 'Проф')}
+                </nav>
+            `;
+            lucide.createIcons();
+            const box = document.getElementById('chat-box'); if(box) box.scrollTop = box.scrollHeight;
+        }
+
+        function navItem(id, icon, label) {
+            const active = window.state.tab === id;
+            return `
+                <button onclick="changeTab('${id}')">
+                    <i data-lucide="${icon}" size="22" class="${active ? 'text-black' : 'text-gray-300'}"></i>
+                    <span class="text-[8px] font-black uppercase mt-1 tracking-widest ${active ? 'text-black' : 'text-gray-300'}">${label}</span>
+                </button>
+            `;
+        }
+
+        function renderPage(isAdmin) {
+            const s = window.state;
+            if(s.tab === 'chats') {
+                if(s.chatMode) {
+                    const filtered = s.messages.filter(m => (m.from===s.user.uid && m.to===s.chatMode) || (m.from===s.chatMode && m.to===s.user.uid) || (s.chatMode==='bot' && (m.to==='bot' || m.from==='bot')));
+                    return `
+                        <div class="h-full flex flex-col px-8">
+                            <div id="chat-box" class="flex-1 overflow-y-auto space-y-6 py-6 no-scrollbar">
+                                <button onclick="window.state.chatMode=null;render()" class="text-[9px] font-black text-gray-300 uppercase flex items-center gap-1 mb-4"><i data-lucide="chevron-left" size="10"></i> Назад</button>
+                                ${filtered.map(m => `
+                                    <div class="flex ${m.from === s.user.uid ? 'justify-end' : 'justify-start'}">
+                                        <div class="max-w-[85%]">
+                                            <div class="${m.from === s.user.uid ? 'msg-me' : 'msg-them'} p-4 text-[13px] font-medium leading-relaxed">
+                                                ${m.text}
+                                            </div>
+                                            <p class="text-[7px] font-black text-gray-300 uppercase mt-2 px-1 tracking-widest">${m.sender} • ${m.tag}</p>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="py-6 flex gap-2">
+                                <input id="msg-input" class="flex-1 bg-white border border-gray-100 p-4 rounded-2xl text-xs font-bold text-black" placeholder="Написать..." onkeypress="if(event.key==='Enter') sendMsg()">
+                                <button onclick="sendMsg()" class="btn-black w-12 h-12 rounded-2xl flex items-center justify-center"><i data-lucide="arrow-up" size="18"></i></button>
+                            </div>
+                        </div>
+                    `;
+                }
+                const p = [...new Set(s.messages.map(m => m.from === s.user.uid ? m.to : m.from))].filter(x => x !== s.user.uid);
+                if(p.length === 0) return `<div class="p-20 text-center text-[10px] font-black text-gray-200 uppercase tracking-widest italic">Здесь пока пусто</div>`;
+                return `
+                    <div class="p-8 space-y-3">
+                        ${p.map(uid => {
+                            const u = s.users.find(x=>x.uid===uid);
+                            return u ? `<button onclick="window.state.chatMode='${uid}';render()" class="w-full flex items-center gap-4 p-5 rounded-3xl border border-gray-100 bg-white"><div class="w-10 h-10 bg-gray-50 flex items-center justify-center rounded-xl font-black text-gray-300">${u.username[0].toUpperCase()}</div><div class="text-left text-xs font-black uppercase">${u.username}</div></button>` : '';
+                        }).join('')}
+                    </div>
+                `;
+            }
+            if(s.tab === 'network') {
+                const others = s.users.filter(u=>u.uid!==s.user.uid);
+                if(others.length === 0) return `<div class="p-20 text-center text-[10px] font-black text-gray-200 uppercase tracking-widest italic">Здесь пока пусто</div>`;
+                return `
+                    <div class="p-8 space-y-3">
+                        ${others.map(u => `
+                            <div class="flex items-center justify-between p-5 rounded-3xl border border-gray-100 bg-white">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center text-gray-200 font-black">${u.username[0].toUpperCase()}</div>
+                                    <div><div class="text-xs font-black uppercase tracking-tight">${u.username}</div><div class="text-[8px] text-gray-300 font-bold uppercase tracking-widest">${u.tag}</div></div>
+                                </div>
+                                <button onclick="window.state.tab='chats'; window.state.chatMode='${u.uid}'; render()" class="p-2 text-gray-300"><i data-lucide="message-square" size="18"></i></button>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            if(s.tab === 'term' && isAdmin) {
+                return `<div class="p-8 h-full flex flex-col font-mono text-[10px]"><div class="flex-1 space-y-1 text-gray-300 overflow-y-auto italic">${s.terminal.map(l=>`<div>${l}</div>`).join('')}</div><div class="pt-4 border-t border-gray-100 flex gap-2"><span class="font-black text-black">></span><input id="t-input" class="flex-1 bg-transparent font-bold text-black uppercase" onkeypress="if(event.key==='Enter') runTerm()" placeholder="..."></div></div>`;
+            }
+            if(s.tab === 'market') {
+                return `<div class="p-20 text-center"><h3 class="text-xs font-black uppercase tracking-widest text-gray-200 italic">Скоро открытие</h3></div>`;
+            }
+            if(s.tab === 'profile') {
+                return `
+                    <div class="p-10 flex flex-col items-center">
+                        <div class="w-24 h-24 rounded-[2.5rem] border border-gray-100 flex items-center justify-center text-3xl font-black text-gray-200 mb-6 bg-white shadow-sm">
+                            ${s.profile.username[0].toUpperCase()}
+                        </div>
+                        <h2 class="text-2xl font-black italic uppercase tracking-tighter text-black">${s.profile.username}</h2>
+                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">${s.profile.tag}</p>
+                        <button onclick="signOut(auth); location.reload();" class="w-full p-5 rounded-3xl border border-dashed border-gray-200 text-[10px] font-black text-gray-300 uppercase mt-12 tracking-widest">Выход</button>
+                    </div>
+                `;
+            }
+            return '';
+        }
+    </script>
+</body>
+</html>
+
+
